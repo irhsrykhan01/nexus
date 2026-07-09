@@ -9,13 +9,14 @@ import pino from 'pino';
 import logger from '../utils/Logger.js';
 import config from '../../config/config.js';
 import Handler from './Handler.js';
+import Loader from './Loader.js'; // <--- Impor loader
 
 class Client {
   constructor() {
     this.socket = null;
+    this.loader = new Loader(); // <--- Inisialisasi loader
   }
 
-  // Helper untuk mendapatkan versi WhatsApp Web dengan batas waktu (timeout)
   async getWhatsAppVersion() {
     const timeoutPromise = (ms) => new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Timeout saat mengambil versi WA')), ms)
@@ -23,7 +24,6 @@ class Client {
 
     try {
       logger.info('Mengambil versi protokol WhatsApp Web terbaru...');
-      // Membatasi proses pencarian versi maksimal 4 detik agar tidak menggantung (hang)
       const result = await Promise.race([
         fetchLatestBaileysVersion(),
         timeoutPromise(4000)
@@ -32,13 +32,17 @@ class Client {
       logger.info(`Berhasil mendapatkan versi dinamis: v${result.version.join('.')}`);
       return result.version;
     } catch (err) {
-      const fallbackVersion = [2, 3000, 1033893291]; // Versi stabil cadangan
+      const fallbackVersion = [2, 3000, 1033893291];
       logger.warn(`Gagal memuat versi dinamis (${err.message}). Menggunakan fallback v${fallbackVersion.join('.')}`);
       return fallbackVersion;
     }
   }
 
   async connect() {
+    // 1. Memuat seluruh berkas plugin sebelum membuka koneksi WebSocket
+    logger.info('Memulai pemindaian sistem plugin...');
+    await this.loader.loadPlugins();
+
     logger.info('Menginisialisasi modul autentikasi...');
     const { state, saveCreds } = await useMultiFileAuthState(config.sessionPath);
 
@@ -54,7 +58,6 @@ class Client {
       logger: pino({ level: 'silent' })
     });
 
-    // Deklarasi variabel instance handler
     let messageHandler = null;
 
     this.socket.ev.on('connection.update', async (update) => {
@@ -81,14 +84,13 @@ class Client {
       else if (connection === 'open') {
         logger.info(`Koneksi berhasil terjalin! ${config.botName} kini aktif.`);
         
-        // Inisialisasi Handler baru ketika soket koneksi sukses terhubung
-        messageHandler = new Handler(this.socket);
+        // 2. Mengirim instance socket dan loader ke Handler utama saat bot siap
+        messageHandler = new Handler(this.socket, this.loader);
       }
     });
 
     this.socket.ev.on('creds.update', saveCreds);
 
-    // Meneruskan seluruh event pesan masuk baru ke Handler utama
     this.socket.ev.on('messages.upsert', async (upsert) => {
       if (messageHandler) {
         await messageHandler.handleMessage(upsert);

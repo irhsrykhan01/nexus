@@ -9,9 +9,6 @@ class Handler {
     this.loader = loader;
   }
 
-  /**
-   * Menerima payload pesan masuk, mencocokkan ke plugin, memvalidasi hak akses, lalu mengeksekusi
-   */
   async handleMessage(upsert) {
     if (!upsert.messages || upsert.messages.length === 0) return;
     
@@ -20,11 +17,13 @@ class Handler {
 
     try {
       const ctx = new Context(this.socket, rawMsg);
+      
+      // Menyematkan akses loader ke dalam objek konteks agar dapat dibaca oleh plugin menu
+      ctx.loader = this.loader; 
 
       const chatLabel = ctx.isGroup ? `Grup (${ctx.from})` : `Pribadi (${ctx.sender.split('@')[0]})`;
       logger.info(`[Pesan Masuk] Dari: ${chatLabel} | Teks: "${ctx.body || '[Non-Teks/Media]'}"`);
 
-      // Memeriksa jika pesan mengandung prefix dan merupakan panggilan perintah
       if (ctx.command) {
         const plugin = this.loader.getCommand(ctx.command);
 
@@ -56,7 +55,6 @@ class Handler {
             }
           }
 
-          // Eksekusi fungsi utama plugin dengan penanganan error terisolasi
           try {
             await plugin.execute(ctx);
           } catch (execErr) {
